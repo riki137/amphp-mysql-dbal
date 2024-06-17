@@ -2,63 +2,38 @@
 
 namespace Amp\Mysql\DBAL;
 
-use Amp\Mysql\Statement as SqlStatement;
+use Amp\Mysql\MysqlStatement as SqlStatement;
+use Closure;
 use Doctrine\DBAL\Driver\Exception;
 use Doctrine\DBAL\Driver\Result;
 use Doctrine\DBAL\Driver\Statement;
 use Doctrine\DBAL\ParameterType;
+use Throwable;
+use function is_int;
 
 class MysqlStatement implements Statement
 {
-    private const PARAM_TYPES = [
-        ParameterType::NULL => null,
-        ParameterType::INTEGER => null,
-        ParameterType::STRING => null,
-        ParameterType::ASCII => null,
-        ParameterType::BINARY => null,
-        ParameterType::LARGE_OBJECT => null,
-        ParameterType::BOOLEAN => null,
-    ];
-
     private SqlStatement $statement;
-    private \Closure $resultListener;
+
+    private Closure $resultListener;
 
     private array $values = [];
+
     private array $types = [];
 
     public function __construct(SqlStatement $statement, callable $resultListener)
     {
         $this->statement = $statement;
-        $this->resultListener = $resultListener instanceof \Closure
+        $this->resultListener = $resultListener instanceof Closure
             ? $resultListener
-            : \Closure::fromCallable($resultListener);
+            : $resultListener(...);
     }
 
-    public function bindValue($param, $value, $type = ParameterType::STRING): bool
+    public function bindValue($param, $value, ParameterType $type = ParameterType::STRING): void
     {
-        if (!isset(self::PARAM_TYPES[$type])) {
-            throw Exception\UnknownParameterType::new($type);
-        }
-
-        $key = \is_int($param) ? $param - 1 : $param;
+        $key = is_int($param) ? $param - 1 : $param;
 
         $this->values[$key] = $this->convertValue($value, $type);
-
-        return true;
-    }
-
-    public function bindParam($param, &$variable, $type = ParameterType::STRING, $length = null): bool
-    {
-        if (!isset(self::PARAM_TYPES[$type])) {
-            throw Exception\UnknownParameterType::new($type);
-        }
-
-        $key = \is_int($param) ? $param - 1 : $param;
-
-        $this->values[$key] = &$variable;
-        $this->types[$key] = $type;
-
-        return true;
     }
 
     public function execute($params = null): Result
@@ -81,19 +56,18 @@ class MysqlStatement implements Statement
             ($this->resultListener)($result);
 
             return new MysqlResult($result);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             throw MysqlException::new($e);
         }
     }
 
-    private function convertValue($value, int $type): null|bool|int|string
+    private function convertValue($value, ParameterType $type): null|bool|int|string
     {
         return match ($type) {
-            ParameterType::NULL => null,
+            ParameterType::STRING, ParameterType::ASCII, ParameterType::LARGE_OBJECT, ParameterType::BINARY => (string) $value,
             ParameterType::INTEGER => (int) $value,
-            ParameterType::ASCII, ParameterType::LARGE_OBJECT, ParameterType::BINARY, ParameterType::STRING => (string) $value,
             ParameterType::BOOLEAN => (bool) $value,
-            default => throw Exception\UnknownParameterType::new($type),
+            ParameterType::NULL => null,
         };
     }
 }
